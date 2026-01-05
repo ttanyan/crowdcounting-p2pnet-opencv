@@ -65,6 +65,9 @@ class P2PNet():
         self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
         # SHTechA 预训练模型通常对应 pyramid_levels=[3], row=2, line=2
         self.anchor_gen = AnchorPoints(pyramid_levels=[3], row=2, line=2)
+        
+        # 预加载模型到内存（在初始化时完成）
+        self.model_loaded = True
 
     def _sigmoid(self, x):
         # 优化的sigmoid函数，避免数值溢出
@@ -201,13 +204,13 @@ class P2PNet():
         cv2.putText(result_img, f"Count: {len(points)}", (30, 50),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
         
+        # 显示置信度阈值
+        cv2.putText(result_img, f"Confidence: {conf_threshold}", (30, 100),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+        
         # 记录结束时间并计算耗时
         end_time = time.time()
         processing_time = end_time - start_time
-        
-        # 在图像上添加处理时间信息
-        cv2.putText(result_img, f"Time: {processing_time:.3f}s", (30, 100),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
         
         return result_img, processing_time
 
@@ -274,6 +277,14 @@ def process_base64_image(image_base64, model_path='weight/SHTechA.onnx', conf_th
 # 创建Flask应用
 app = Flask(__name__)
 
+# 在应用启动时预加载模型
+model = None
+
+@app.before_first_request
+def load_model():
+    global model
+    model = P2PNet('weight/SHTechA.onnx', use_gpu=False)
+
 @app.route('/count_crowd', methods=['POST'])
 def count_crowd_api():
     """
@@ -334,70 +345,73 @@ def health_check():
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--imgpath', default='imgs/img_5.png')
-    parser.add_argument('--onnx_path', default='weight/SHTechA.onnx')
-    parser.add_argument('--gpu', action='store_true', help="是否使用 CUDA")
-    args = parser.parse_args()
+    # 检查是否需要启动API服务（通过环境变量）
+    if os.environ.get('START_API_SERVICE') == '1':
+        # 启动Flask API服务
+        app.run(host='0.0.0.0', port=8989, debug=False)
+    else:
+        # 运行命令行模式
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--imgpath', default='imgs/img_5.png')
+        parser.add_argument('--onnx_path', default='weight/SHTechA.onnx')
+        parser.add_argument('--gpu', action='store_true', help="是否使用 CUDA")
+        args = parser.parse_args()
 
-    # 初始化
-    detector = P2PNet(args.onnx_path, use_gpu=args.gpu)
+        # 初始化
+        detector = P2PNet(args.onnx_path, use_gpu=args.gpu)
 
-    # 读取图像
-    frame = cv2.imread(args.imgpath)
-    if frame is None:
-        print("tu")
-        exit()
+        # 读取图像
+        frame = cv2.imread(args.imgpath)
+        if frame is None:
+            print("tu")
+            exit()
 
-    # 记录开始时间
-    start_time = time.time()
+        # 记录开始时间
+        start_time = time.time()
 
-    # 检测
-    scores, points = detector.detect(frame)
+        # 检测
+        scores, points = detector.detect(frame)
 
-    # 绘制结果
-    for pt in points:
-        cv2.circle(frame, (int(pt[0]), int(pt[1])), 3, (0, 255, 0), -1)
+        # 绘制结果
+        for pt in points:
+            cv2.circle(frame, (int(pt[0]), int(pt[1])), 3, (0, 255, 0), -1)
 
-    # 显示计数
-    cv2.putText(frame, f"Count: {len(points)}", (30, 50),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
+        # 显示计数
+        cv2.putText(frame, f"Count: {len(points)}", (30, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
 
-    # 计算并显示处理时间
-    end_time = time.time()
-    processing_time = end_time - start_time
-    cv2.putText(frame, f"Time: {processing_time:.3f}s", (30, 100),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+        # 计算并显示处理时间
+        end_time = time.time()
+        processing_time = end_time - start_time
+        cv2.putText(frame, f"Time: {processing_time:.3f}s", (30, 100),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
 
-    print(f"检测完成，人数: {len(points)}")
-    print(f"处理耗时: {processing_time:.3f}秒")
+        print(f"检测完成，人数: {len(points)}")
+        print(f"处理耗时: {processing_time:.3f}秒")
 
-    # 创建保存目录
-    output_dir = "image_test"
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    
-    # 生成时间戳加随机数的文件名
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    random_num = random.randint(1000, 9999)
-    filename = f"{output_dir}/result_{timestamp}_{random_num}.jpg"
-    
-    # 保存结果图片
-    cv2.imwrite(filename, frame)
-    print(f"检测结果已保存到: {filename}")
+        # 创建保存目录
+        output_dir = "image_test"
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        
+        # 生成时间戳加随机数的文件名
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        random_num = random.randint(1000, 9999)
+        filename = f"{output_dir}/result_{timestamp}_{random_num}.jpg"
+        
+        # 保存结果图片
+        cv2.imwrite(filename, frame)
+        print(f"检测结果已保存到: {filename}")
 
-    # 窗口展示优化（针对大图缩小展示）
-    h, w = frame.shape[:2]
-    show_w = 1280
-    show_h = int(h * (show_w / w))
-    cv2.namedWindow('P2PNet Drone View', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('P2PNet Drone View', show_w, show_h)
-    cv2.imshow('P2PNet Drone View', frame)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+        # 窗口展示优化（针对大图缩小展示）
+        h, w = frame.shape[:2]
+        show_w = 1280
+        show_h = int(h * (show_w / w))
+        cv2.namedWindow('P2PNet Drone View', cv2.WINDOW_NORMAL)
+        cv2.resizeWindow('P2PNet Drone View', show_w, show_h)
+        cv2.imshow('P2PNet Drone View', frame)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 else:
-    # 当作为模块导入时，启动Flask应用
-    if __name__ != '__main__':
-        # 如果需要直接运行Flask应用，取消下面的注释
-        # app.run(host='0.0.0.0', port=5000, debug=False)
-        pass
+    # 当作为模块导入时
+    pass
