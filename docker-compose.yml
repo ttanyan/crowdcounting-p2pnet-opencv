@@ -1,0 +1,15 @@
+services:
+  crowdcounting-api:
+    build: .
+    container_name: crowdcounting-p2pnet-api
+    ports:
+      - "8080:8989"  # 将容器的8989端口映射到主机的8080端口
+    volumes:
+      - ./weight:/home/appuser/app/weight  # 挂载模型文件
+      - ./imgs:/home/appuser/app/imgs      # 挂载输入图片目录
+      - ./image_test:/home/appuser/app/image_test  # 挂载输出图片目录
+    environment:
+      - FLASK_ENV=production
+      - START_API_SERVICE=1
+    restart: unless-stopped
+    command: ["python", "main.py"]
