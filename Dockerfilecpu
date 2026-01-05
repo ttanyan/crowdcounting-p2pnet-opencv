@@ -1,0 +1,27 @@
+# 使用轻量级 Python 镜像
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# 安装 OpenCV 运行所需的系统库（不含 GUI 模块）
+RUN apt-get update && apt-get install -y \
+    libglib2.0-0 \
+    libgl1-mesa-glx \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装依赖
+RUN pip install --no-cache-dir \
+    flask \
+    opencv-python-headless \
+    numpy \
+    onnxruntime \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 复制当前目录所有文件到容器
+COPY . .
+
+# 暴露端口
+EXPOSE 8083
+
+# 启动程序
+CMD ["python", "main.py"]
